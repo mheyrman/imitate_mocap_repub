@@ -10,19 +10,21 @@ project(imitate_mocap_repub)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   tf2_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  std_msgs
 )
 
 ## System dependencies are found with CMake's conventions
 find_package(Eigen3 REQUIRED)
 
 include_directories(
-  include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
 )
 
 catkin_package(
-  INCLUDE_DIRS include
   LIBRARIES imitate_mocap_repub
   CATKIN_DEPENDS roscpp tf2_msgs
 )

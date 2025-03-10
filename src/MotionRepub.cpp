@@ -5,7 +5,9 @@
 #include <tf2_ros/transform_listener.h>
 #include <std_msgs/Float64MultiArray.h>
 
+#include <thread>
 #include <vector>
+#include <unordered_map>
 #include <Eigen/Dense>
 
 
@@ -19,7 +21,7 @@ private:
     ros::Subscriber mocap_sub;
 
     std::string body_frame_str;
-    std::vector<string> foot_frames_str;
+    std::vector<std::string> foot_frames_str;
 
     std::unordered_map<std::string, int> foot_frame_num;
 
@@ -30,7 +32,7 @@ private:
 public:
     MotionRepub() {
         motion_repub = nh.advertise<std_msgs::Float64MultiArray>("/reference_motion", 1);
-        mocap_sub = nh.subscribe("/tf", 1, mocapCallback, this);
+        mocap_sub = nh.subscribe("/tf", 1, &MotionRepub::mocapCallback, this);
 
         body_frame_str = "RigidBody3";
         foot_frames_str = {"RigidBody4"};
@@ -42,6 +44,7 @@ public:
 
     void mocapCallback(const tf2_msgs::TFMessage::ConstPtr& msg) {
         for (const auto& transform : msg->transforms) {
+            ROS_INFO_STREAM("child_frame_id: " << transform.child_frame_id);
             if (transform.child_frame_id == body_frame_str) {
                 body_pos = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
                 body_quat = {transform.transform.rotation.x, transform.transform.rotation.y, transform.transform.rotation.z, transform.transform.rotation.w};
@@ -64,8 +67,7 @@ public:
         Eigen::Quaterniond quat(q[0], q[1], q[2], q[3]);
         Eigen::Vector3d grav_vec(grav[0], grav[1], grav[2]);
         Eigen::Vector3d rotated_grav = quat.inverse() * grav_vec;
-        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};       
-    }
+        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};ted_gra    }
 
     void publishMotionData() {
         ros::Rate rate(50);
@@ -83,14 +85,20 @@ public:
             motion_msg.data.push_back(proj_grav[1]);
             motion_msg.data.push_back(proj_grav[2]);
             motion_msg.data.push_back(body_pos[2]);
+
+            motion_repub.publish(motion_msg);
+            rate.sleep();
         }
     }
 
-}
+};
 
 int main(int argc, char **argv) {
     ros::init(argc, argv, "motion_repub");
     MotionRepub motion_repub;
-    motion_repub.publishMotionData();
+
+    std::thread motion_thread(&MotionRepub::publishMotionData, &motion_repub);
+    ros::spin();
+    motion_thread.join();
     return 0;
 }
