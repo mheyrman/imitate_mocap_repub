@@ -30,7 +30,7 @@ private:
     std::vector<std::vector<double>> foot_pos;      // [foot_num][x, y, z]
 
 public:
-    MotionRepub() {
+    MotionRepub() : tfListener(tfBuffer) {
         motion_repub = nh.advertise<std_msgs::Float64MultiArray>("/reference_motion", 1);
         mocap_sub = nh.subscribe("/tf", 1, &MotionRepub::mocapCallback, this);
 
@@ -67,7 +67,8 @@ public:
         Eigen::Quaterniond quat(q[0], q[1], q[2], q[3]);
         Eigen::Vector3d grav_vec(grav[0], grav[1], grav[2]);
         Eigen::Vector3d rotated_grav = quat.inverse() * grav_vec;
-        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};ted_gra    }
+        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};
+    }
 
     void publishMotionData() {
         ros::Rate rate(50);
