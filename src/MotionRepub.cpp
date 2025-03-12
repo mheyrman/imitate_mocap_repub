@@ -29,6 +29,24 @@ private:
     std::vector<double> body_quat = {1, 0, 0, 0};   // w, x, y, z
     std::vector<std::vector<double>> foot_pos;      // [foot_num][x, y, z]
 
+    std::vector<double> quatToProjGrav(std::vector<double> q) {
+        std::vector<double> grav = {0.0, 0.0, -1.0};
+        // rotate grav by inverse of quaternion q
+        Eigen::Quaterniond quat(q[0], q[1], q[2], q[3]);
+        Eigen::Vector3d grav_vec(grav[0], grav[1], grav[2]);
+        Eigen::Vector3d rotated_grav = quat.inverse() * grav_vec;
+        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};
+    }
+    
+    std::vector<double> transformW2B(std::vector<double> base_p_w, std::vector<double> base_q_w, std::vector<double> p_w) {
+        Eigen::Quaterniond base_q(base_q_w[0], base_q_w[1], base_q_w[2], base_q_w[3]);
+        Eigen::Vector3d base_p(base_p_w[0], base_p_w[1], base_p_w[2]);
+        Eigen::Vector3d p(p_w[0], p_w[1], p_w[2]);
+
+        Eigen::Vector3d p_b = base_q.inverse() * (p - base_p);
+        return {p_b[0], p_b[1], p_b[2]};
+    }
+    
 public:
     MotionRepub() : tfListener(tfBuffer) {
         motion_repub = nh.advertise<std_msgs::Float64MultiArray>("/reference_motion", 1);
@@ -44,31 +62,21 @@ public:
 
     void mocapCallback(const tf2_msgs::TFMessage::ConstPtr& msg) {
         for (const auto& transform : msg->transforms) {
-            ROS_INFO_STREAM("child_frame_id: " << transform.child_frame_id);
+            // ROS_INFO_STREAM("child_frame_id: " << transform.child_frame_id);
             if (transform.child_frame_id == body_frame_str) {
                 body_pos = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
                 body_quat = {transform.transform.rotation.x, transform.transform.rotation.y, transform.transform.rotation.z, transform.transform.rotation.w};
             }
             else if (std::find(foot_frames_str.begin(), foot_frames_str.end(), transform.child_frame_id) != foot_frames_str.end()) {
                 int foot_index = foot_frame_num[transform.child_frame_id];
-                
-                foot_pos[foot_index] = {
-                    transform.transform.translation.x - body_pos[0],
-                    transform.transform.translation.y - body_pos[1],
-                    transform.transform.translation.z - body_pos[2]
-                };
+
+                std::vector<double> foot_pos_w = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
+                std::vector<double> foot_pos_b = transformW2B(body_pos, body_quat, foot_pos_w);
+                foot_pos[foot_index] = foot_pos_b;
             }
         }
     }
 
-    std::vector<double> quatToProjGrav(std::vector<double> q) {
-        std::vector<double> grav = {0.0, 0.0, -1.0};
-        // rotate grav by inverse of quaternion q
-        Eigen::Quaterniond quat(q[0], q[1], q[2], q[3]);
-        Eigen::Vector3d grav_vec(grav[0], grav[1], grav[2]);
-        Eigen::Vector3d rotated_grav = quat.inverse() * grav_vec;
-        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};
-    }
 
     void publishMotionData() {
         ros::Rate rate(50);
