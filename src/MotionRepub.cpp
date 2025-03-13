@@ -54,19 +54,19 @@ private:
 
     void calculateBodyPosQuat() {
         // calculate body position as average of shoulder positions
-        // calculate body quaternion based on shoulder positions given order FL, FR, BL, BR
+        // calculate body quaternion based on shoulder positions given order FL, BL, FR, BR
         body_pos[0] = (shoulder_pos[0][0] + shoulder_pos[1][0] + shoulder_pos[2][0] + shoulder_pos[3][0]) / 4;
         body_pos[1] = (shoulder_pos[0][1] + shoulder_pos[1][1] + shoulder_pos[2][1] + shoulder_pos[3][1]) / 4;
         body_pos[2] = (shoulder_pos[0][2] + shoulder_pos[1][2] + shoulder_pos[2][2] + shoulder_pos[3][2]) / 4;
 
         // calculate body quaternion
         Eigen::Vector3d fl = {shoulder_pos[0][0], shoulder_pos[0][1], shoulder_pos[0][2]};
-        Eigen::Vector3d fr = {shoulder_pos[1][0], shoulder_pos[1][1], shoulder_pos[1][2]};
-        Eigen::Vector3d bl = {shoulder_pos[2][0], shoulder_pos[2][1], shoulder_pos[2][2]};
-        Eigen::Vector3d br = {shoulder_pos[3][0], shoulder_pos[3][1], shoulder_pos[3][2]};
+        Eigen::Vector3d rl = {shoulder_pos[1][0], shoulder_pos[1][1], shoulder_pos[1][2]};
+        Eigen::Vector3d fr = {shoulder_pos[2][0], shoulder_pos[2][1], shoulder_pos[2][2]};
+        Eigen::Vector3d rr = {shoulder_pos[3][0], shoulder_pos[3][1], shoulder_pos[3][2]};
 
         Eigen::Vector3d x_axis = (fl - fr).normalized();
-        Eigen::Vector3d y_axis = (fl - bl).normalized();
+        Eigen::Vector3d y_axis = (fl - rl).normalized();
         Eigen::Vector3d z_axis = x_axis.cross(y_axis).normalized();
         y_axis = z_axis.cross(x_axis).normalized();
 
@@ -86,7 +86,7 @@ public:
 
         // body_frame_str = "2616";
 
-        // FL, FR, BL, BR
+        // FL, RL, FR, RR
         foot_frames_ids = {5820, 2857, 5822, 5817};
         shoulder_frames_ids = {5784, 5799, 5795, 5798};
         for (int i = 0; i < foot_frames_ids.size(); i++) {
