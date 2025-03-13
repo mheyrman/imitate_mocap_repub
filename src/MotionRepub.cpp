@@ -3,11 +3,13 @@
 #include <tf2_msgs/TFMessage.h>
 // #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_listener.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <std_msgs/Float64MultiArray.h>
 
 #include <thread>
 #include <vector>
 #include <unordered_map>
+#include <string>
 #include <Eigen/Dense>
 
 
@@ -20,13 +22,16 @@ private:
     ros::Publisher motion_repub;
     ros::Subscriber mocap_sub;
 
-    std::string body_frame_str;
-    std::vector<std::string> foot_frames_str;
+    // std::string body_frame_str;
+    std::vector<int> foot_frames_ids;
+    std::vector<int> shoulder_frames_ids;
 
-    std::unordered_map<std::string, int> foot_frame_num;
+    std::unordered_map<int, int> foot_frame_num;
+    std::unordered_map<int, int> shoulder_frame_num;
 
     std::vector<double> body_pos = {0, 0, 0};       // x, y, z
     std::vector<double> body_quat = {1, 0, 0, 0};   // w, x, y, z
+    std::vector<std::vector<double>> shoulder_pos;      // [shoulder_num][x, y, z]
     std::vector<std::vector<double>> foot_pos;      // [foot_num][x, y, z]
 
     std::vector<double> quatToProjGrav(std::vector<double> q) {
@@ -46,31 +51,88 @@ private:
         Eigen::Vector3d p_b = base_q.inverse() * (p - base_p);
         return {p_b[0], p_b[1], p_b[2]};
     }
+
+    void calculateBodyPosQuat() {
+        // calculate body position as average of shoulder positions
+        // calculate body quaternion based on shoulder positions given order FL, FR, BL, BR
+        body_pos[0] = (shoulder_pos[0][0] + shoulder_pos[1][0] + shoulder_pos[2][0] + shoulder_pos[3][0]) / 4;
+        body_pos[1] = (shoulder_pos[0][1] + shoulder_pos[1][1] + shoulder_pos[2][1] + shoulder_pos[3][1]) / 4;
+        body_pos[2] = (shoulder_pos[0][2] + shoulder_pos[1][2] + shoulder_pos[2][2] + shoulder_pos[3][2]) / 4;
+
+        // calculate body quaternion
+        Eigen::Vector3d fl = {shoulder_pos[0][0], shoulder_pos[0][1], shoulder_pos[0][2]};
+        Eigen::Vector3d fr = {shoulder_pos[1][0], shoulder_pos[1][1], shoulder_pos[1][2]};
+        Eigen::Vector3d bl = {shoulder_pos[2][0], shoulder_pos[2][1], shoulder_pos[2][2]};
+        Eigen::Vector3d br = {shoulder_pos[3][0], shoulder_pos[3][1], shoulder_pos[3][2]};
+
+        Eigen::Vector3d x_axis = (fl - fr).normalized();
+        Eigen::Vector3d y_axis = (fl - bl).normalized();
+        Eigen::Vector3d z_axis = x_axis.cross(y_axis).normalized();
+        y_axis = z_axis.cross(x_axis).normalized();
+
+        Eigen::Matrix3d rot_mat;
+        rot_mat << x_axis[0], y_axis[0], z_axis[0],
+                   x_axis[1], y_axis[1], z_axis[1],
+                   x_axis[2], y_axis[2], z_axis[2];
+        
+        Eigen::Quaterniond quat(rot_mat);
+        body_quat = {quat.w(), quat.x(), quat.y(), quat.z()};
+    }
     
 public:
     MotionRepub() : tfListener(tfBuffer) {
         motion_repub = nh.advertise<std_msgs::Float64MultiArray>("/reference_motion", 1);
-        mocap_sub = nh.subscribe("/tf", 1, &MotionRepub::mocapCallback, this);
+        mocap_sub = nh.subscribe("/qualisys/no_labels_marker_array", 1, &MotionRepub::mocapCallback, this);
 
-        body_frame_str = "RigidBody3";
-        foot_frames_str = {"RigidBody4"};
-        for (int i = 0; i < foot_frames_str.size(); i++) {
-            foot_frame_num[foot_frames_str[i]] = i;
+        // body_frame_str = "2616";
+
+        // FL, FR, BL, BR
+        foot_frames_ids = {5820, 2857, 5822, 5817};
+        shoulder_frames_ids = {5784, 5799, 5795, 5798};
+        for (int i = 0; i < foot_frames_ids.size(); i++) {
+            foot_frame_num[foot_frames_ids[i]] = i;
             foot_pos.push_back(std::vector<double>(3, 0));
+        }
+        for (int i = 0; i < shoulder_frames_ids.size(); i++) {
+            shoulder_frame_num[shoulder_frames_ids[i]] = i;
+            shoulder_pos.push_back(std::vector<double>(3, 0));
         }
     }
 
-    void mocapCallback(const tf2_msgs::TFMessage::ConstPtr& msg) {
-        for (const auto& transform : msg->transforms) {
-            // ROS_INFO_STREAM("child_frame_id: " << transform.child_frame_id);
-            if (transform.child_frame_id == body_frame_str) {
-                body_pos = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
-                body_quat = {transform.transform.rotation.x, transform.transform.rotation.y, transform.transform.rotation.z, transform.transform.rotation.w};
-            }
-            else if (std::find(foot_frames_str.begin(), foot_frames_str.end(), transform.child_frame_id) != foot_frames_str.end()) {
-                int foot_index = foot_frame_num[transform.child_frame_id];
+    // void mocapCallback(const tf2_msgs::TFMessage::ConstPtr& msg) {
+    //     for (const auto& transform : msg->transforms) {
+    //         // ROS_INFO_STREAM("child_frame_id: " << transform.child_frame_id);
+    //         if (transform.child_frame_id == body_frame_str) {
+    //             body_pos = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
+    //             body_quat = {transform.transform.rotation.x, transform.transform.rotation.y, transform.transform.rotation.z, transform.transform.rotation.w};
+    //         }
+    //         else if (std::find(foot_frames_str.begin(), foot_frames_str.end(), transform.child_frame_id) != foot_frames_str.end()) {
+    //             int foot_index = foot_frame_num[transform.child_frame_id];
 
-                std::vector<double> foot_pos_w = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
+    //             std::vector<double> foot_pos_w = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
+    //             std::vector<double> foot_pos_b = transformW2B(body_pos, body_quat, foot_pos_w);
+    //             foot_pos[foot_index] = foot_pos_b;
+    //         }
+    //     }
+    // }
+
+    void mocapCallback(const visualization_msgs::MarkerArray::ConstPtr& msg) {
+        for (const auto& marker : msg->markers) {
+            // ROS_INFO_STREAM("child_frame_id: " << marker.header.frame_id);
+            if (std::find(shoulder_frames_ids.begin(), shoulder_frames_ids.end(), marker.id) != shoulder_frames_ids.end()) {
+                // body_pos = {marker.pose.position.x, marker.pose.position.y, marker.pose.position.z};
+                // body_quat = {marker.pose.orientation.w, marker.pose.orientation.x, marker.pose.orientation.y, marker.pose.orientation.z};
+                int shoulder_index = shoulder_frame_num[marker.id];
+
+                std::vector<double> shoulder_pos_w = {marker.pose.position.x, marker.pose.position.y, marker.pose.position.z};
+                shoulder_pos[shoulder_index] = shoulder_pos_w;
+
+                calculateBodyPosQuat();
+            }
+            else if (std::find(foot_frames_ids.begin(), foot_frames_ids.end(), marker.id) != foot_frames_ids.end()) {
+                int foot_index = foot_frame_num[marker.id];
+
+                std::vector<double> foot_pos_w = {marker.pose.position.x, marker.pose.position.y, marker.pose.position.z};
                 std::vector<double> foot_pos_b = transformW2B(body_pos, body_quat, foot_pos_w);
                 foot_pos[foot_index] = foot_pos_b;
             }

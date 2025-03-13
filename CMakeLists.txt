@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
   tf2_geometry_msgs
   std_msgs
+  visualization_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -26,7 +27,7 @@ include_directories(
 
 catkin_package(
   LIBRARIES imitate_mocap_repub
-  CATKIN_DEPENDS roscpp tf2_msgs
+  CATKIN_DEPENDS roscpp tf2_msgs visualization_msgs
 )
 
 add_executable(imitate_mocap_repub_node src/MotionRepub.cpp)
