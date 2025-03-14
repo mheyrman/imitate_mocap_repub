@@ -31,6 +31,7 @@ private:
 
     std::vector<double> body_pos = {0, 0, 0};       // x, y, z
     std::vector<double> body_quat = {1, 0, 0, 0};   // w, x, y, z
+    std::vector<double> proj_grav = {0, 0, 1};
     std::vector<std::vector<double>> shoulder_pos;      // [shoulder_num][x, y, z]
     std::vector<std::vector<double>> foot_pos;      // [foot_num][x, y, z]
 
@@ -48,7 +49,8 @@ private:
         Eigen::Vector3d base_p(base_p_w[0], base_p_w[1], base_p_w[2]);
         Eigen::Vector3d p(p_w[0], p_w[1], p_w[2]);
 
-        Eigen::Vector3d p_b = base_q.inverse() * (p - base_p);
+        Eigen::Matrix3d rotation_matrix = base_q.toRotationMatrix();
+        Eigen::Vector3d p_b = rotation_matrix * (p - base_p);
         return {p_b[0], p_b[1], p_b[2]};
     }
 
@@ -145,7 +147,7 @@ public:
         while (ros::ok()) {
             std_msgs::Float64MultiArray motion_msg;
 
-            std::vector<double> proj_grav = quatToProjGrav(body_quat);
+            proj_grav = quatToProjGrav(body_quat);
 
             for (int i = 0; i < foot_pos.size(); i++) {
                 motion_msg.data.push_back(foot_pos[i][0]);
