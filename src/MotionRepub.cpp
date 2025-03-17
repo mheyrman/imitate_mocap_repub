@@ -34,6 +34,7 @@ private:
     Eigen::Vector3d proj_grav = {0.0, 0.0, -1.0};
     std::vector<Eigen::Vector3d> shoulder_pos;      // [shoulder_num][x, y, z]
     std::vector<Eigen::Vector3d> foot_pos;          // [foot_num][x, y, z]
+    std::vector<Eigen::Vector3d> foot_offset;
     std::vector<Eigen::Quaterniond> foot_quat;      // [foot_num][w, x, y, z]
 
     yaml_tools::YamlNode yamlNode = yaml_tools::YamlNode::fromFile(
@@ -44,6 +45,10 @@ private:
         Eigen::Vector3d grav_vec = {0.0, 0.0, -1.0};
         Eigen::Vector3d rotated_grav = q.inverse() * grav_vec;
         return rotated_grav;
+    }
+
+    Eigen::Vector3d offsetWorldCoordinates(Eigen::Vector3d p, Eigen::Vector3d offset) {
+        return p + offset;
     }
     
     Eigen::Vector3d transformW2B(Eigen::Vector3d base_p, Eigen::Quaterniond base_q, Eigen::Vector3d p) {
@@ -84,6 +89,12 @@ private:
         else
             bodyFrames.push_back({bodyFrameOrigin, crl::Quaternion(R)});
     }
+
+    Offset is calculated in world frame from a set offset in the .BVH files
+    Mocap points are on the joints (shoulder, wrist) and offset defined in BVH and applied w/ getWorldCoordinates
+
+        Note: Dongho does not offset the shoulders, Y up coordinate system
+    
     */
 
     void calculateBodyPosQuat() {
@@ -122,16 +133,39 @@ public:
         mocap_sub = nh.subscribe("/qualisys/no_labels_marker_array", 1, &MotionRepub::mocapCallback, this);
 
         foot_frames_ids = {
-            yamlNode["frame_ids"]["foot_frame_ids"]["FL"].as<int>(),
-            yamlNode["frame_ids"]["foot_frame_ids"]["RL"].as<int>(),
-            yamlNode["frame_ids"]["foot_frame_ids"]["FR"].as<int>(),
-            yamlNode["frame_ids"]["foot_frame_ids"]["RR"].as<int>()
+            yamlNode["frame_info"]["foot_frame_ids"]["FL"].as<int>(),
+            yamlNode["frame_info"]["foot_frame_ids"]["RL"].as<int>(),
+            yamlNode["frame_info"]["foot_frame_ids"]["FR"].as<int>(),
+            yamlNode["frame_info"]["foot_frame_ids"]["RR"].as<int>()
         };
         shoulder_frames_ids = {
-            yamlNode["frame_ids"]["shoulder_frame_ids"]["FL"].as<int>(),
-            yamlNode["frame_ids"]["shoulder_frame_ids"]["RL"].as<int>(),
-            yamlNode["frame_ids"]["shoulder_frame_ids"]["FR"].as<int>(),
-            yamlNode["frame_ids"]["shoulder_frame_ids"]["RR"].as<int>()
+            yamlNode["frame_info"]["shoulder_frame_ids"]["FL"].as<int>(),
+            yamlNode["frame_info"]["shoulder_frame_ids"]["RL"].as<int>(),
+            yamlNode["frame_info"]["shoulder_frame_ids"]["FR"].as<int>(),
+            yamlNode["frame_info"]["shoulder_frame_ids"]["RR"].as<int>()
+        };
+
+        foot_offset = {
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["foot_offset"]["FL"][0].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["FL"][1].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["FL"][2].as<double>()
+            ),
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["foot_offset"]["RL"][0].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["RL"][1].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["RL"][2].as<double>()
+            ),
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["foot_offset"]["FR"][0].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["FR"][1].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["FR"][2].as<double>()
+            ),
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["foot_offset"]["RR"][0].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["RR"][1].as<double>(),
+            yamlNode["frame_info"]["foot_offset"]["RR"][2].as<double>()
+            )
         };
 
         for (int i = 0; i < foot_frames_ids.size(); i++) {
@@ -159,8 +193,7 @@ public:
                 shoulder_pos[shoulder_index] = shoulder_pos_w;
 
                 calculateBodyPosQuat();
-            }
-            else if (std::find(foot_frames_ids.begin(), foot_frames_ids.end(), marker.id) != foot_frames_ids.end()) {
+            } else if (std::find(foot_frames_ids.begin(), foot_frames_ids.end(), marker.id) != foot_frames_ids.end()) {
                 int foot_index = foot_frame_num[marker.id];
 
                 Eigen::Vector3d foot_pos_w = Eigen::Vector3d(
