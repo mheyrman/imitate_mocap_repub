@@ -1,0 +1,11 @@
+frame_ids:
+  foot_frame_ids:
+    FL: 5820
+    RL: 5822
+    FR: 2857
+    RR: 5817
+  shoulder_frame_ids:
+    FL: 5784
+    RL: 5795
+    FR: 5799
+    RR: 5798

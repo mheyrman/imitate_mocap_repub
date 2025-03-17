@@ -9,12 +9,14 @@ project(imitate_mocap_repub)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  roslib
   tf2_msgs
   tf2
   tf2_ros
   tf2_geometry_msgs
   std_msgs
   visualization_msgs
+  yaml_tools
 )
 
 ## System dependencies are found with CMake's conventions

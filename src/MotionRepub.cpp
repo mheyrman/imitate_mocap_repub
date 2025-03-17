@@ -8,9 +8,10 @@
 
 #include <thread>
 #include <vector>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 #include <Eigen/Dense>
+#include <yaml_tools/YamlNode.hpp>
 
 
 
@@ -29,30 +30,65 @@ private:
     std::unordered_map<int, int> foot_frame_num;
     std::unordered_map<int, int> shoulder_frame_num;
 
-    std::vector<double> body_pos = {0, 0, 0};       // x, y, z
-    std::vector<double> body_quat = {1, 0, 0, 0};   // w, x, y, z
-    std::vector<double> proj_grav = {0, 0, 1};
-    std::vector<std::vector<double>> shoulder_pos;      // [shoulder_num][x, y, z]
-    std::vector<std::vector<double>> foot_pos;      // [foot_num][x, y, z]
+    Eigen::Vector3d body_pos = Eigen::Vector3d::Zero();
+    Eigen::Quaterniond body_quat = {1.0, 0.0, 0.0, 0.0};
+    // std::vector<double> body_pos = {0, 0, 0};       // x, y, z
+    // std::vector<double> body_quat = {1, 0, 0, 0};   // w, x, y, z
+    Eigen::Vector3d proj_grav = {0.0, 0.0, -1.0};
+    // std::vector<double> proj_grav = {0, 0, 1};
+    std::vector<Eigen::Vector3d> shoulder_pos;      // [shoulder_num][x, y, z]
+    std::vector<Eigen::Vector3d> foot_pos;      // [foot_num][x, y, z]
+    std::vector<Eigen::Quaterniond> foot_quat;      // [foot_num][w, x, y, z]
 
-    std::vector<double> quatToProjGrav(std::vector<double> q) {
-        std::vector<double> grav = {0.0, 0.0, -1.0};
-        // rotate grav by inverse of quaternion q
-        Eigen::Quaterniond quat(q[0], q[1], q[2], q[3]);
-        Eigen::Vector3d grav_vec(grav[0], grav[1], grav[2]);
-        Eigen::Vector3d rotated_grav = quat.inverse() * grav_vec;
-        return {rotated_grav[0], rotated_grav[1], rotated_grav[2]};
+    yaml_tools::YamlNode yamlNode = yaml_tools::YamlNode::fromFile(
+        ros::package::getPath("your_package_name") + "/config" + "/frame_cfg.yaml"
+    );
+
+    Eigen::Vector3d quatToProjGrav(Eigen::Quaterniond q) {
+        Eigen::Vector3d grav_vec = {0.0, 0.0, -1.0};
+        Eigen::Vector3d rotated_grav = q.inverse() * grav_vec;
+        return rotated_grav;
     }
     
-    std::vector<double> transformW2B(std::vector<double> base_p_w, std::vector<double> base_q_w, std::vector<double> p_w) {
-        Eigen::Quaterniond base_q(base_q_w[0], base_q_w[1], base_q_w[2], base_q_w[3]);
-        Eigen::Vector3d base_p(base_p_w[0], base_p_w[1], base_p_w[2]);
-        Eigen::Vector3d p(p_w[0], p_w[1], p_w[2]);
-
+    Eigen::Vector3d transformW2B(Eigen::Vector3d base_p, Eigen::Quaterniond base_q, Eigen::Vector3d p) {
         Eigen::Matrix3d rotation_matrix = base_q.toRotationMatrix();
-        Eigen::Vector3d p_b = rotation_matrix * (p - base_p);
-        return {p_b[0], p_b[1], p_b[2]};
+        Eigen::Vector3d p_t_b = p - base_p;
+        Eigen::Vector3d p_b = rotation_matrix.transpose() * p_t_b;
+        return p_b;
     }
+    
+    /* 
+    How Dongho does it:
+    {
+        // compute frame by fitting plane
+        crl::P3D rightShoulder = sk->getMarkerByName("RightShoulder")->state.getWorldCoordinates(crl::P3D());
+        crl::P3D leftShoulder = sk->getMarkerByName("LeftShoulder")->state.getWorldCoordinates(crl::P3D());
+        crl::P3D rightUpLeg = sk->getMarkerByName("RightUpLeg")->state.getWorldCoordinates(crl::P3D());
+        crl::P3D leftUpLeg = sk->getMarkerByName("LeftUpLeg")->state.getWorldCoordinates(crl::P3D());
+        
+        vvvvvvv HOW HE CALCULATES BASE POS, BASE QUAT vvvvvvv
+
+        crl::P3D shoulderMid = (rightShoulder + leftShoulder) * 0.5;  // front
+        crl::P3D upLegMid = (rightUpLeg + leftUpLeg) * 0.5;           // rear
+        crl::P3D bodyFrameOrigin = (shoulderMid + upLegMid) * 0.5;
+        crl::V3D xAxis(shoulderMid, upLegMid);  // front to rear
+        crl::V3D z1(rightShoulder, leftShoulder);
+        crl::V3D z2(rightUpLeg, leftUpLeg);
+        crl::V3D yAxis = (z1 + z2).cross(xAxis);
+
+        xAxis.normalize();
+        yAxis.normalize();
+        crl::V3D zAxis = xAxis.cross(yAxis);
+        zAxis.normalize();
+
+        crl::Matrix3x3 R;
+        R << xAxis.x(), yAxis.x(), zAxis.x(), xAxis.y(), yAxis.y(), zAxis.y(), xAxis.z(), yAxis.z(), zAxis.z();
+        if (considerNominalPose)
+            bodyFrames.push_back({bodyFrameOrigin, rStar.inverse() * crl::Quaternion(R)});
+        else
+            bodyFrames.push_back({bodyFrameOrigin, crl::Quaternion(R)});
+    }
+    */
 
     void calculateBodyPosQuat() {
         // calculate body position as average of shoulder positions
@@ -60,15 +96,15 @@ private:
         body_pos[0] = (shoulder_pos[0][0] + shoulder_pos[1][0] + shoulder_pos[2][0] + shoulder_pos[3][0]) / 4;
         body_pos[1] = (shoulder_pos[0][1] + shoulder_pos[1][1] + shoulder_pos[2][1] + shoulder_pos[3][1]) / 4;
         body_pos[2] = (shoulder_pos[0][2] + shoulder_pos[1][2] + shoulder_pos[2][2] + shoulder_pos[3][2]) / 4;
-
+        body_pos[2] += 0.15;
         // calculate body quaternion
         Eigen::Vector3d fl = {shoulder_pos[0][0], shoulder_pos[0][1], shoulder_pos[0][2]};
         Eigen::Vector3d rl = {shoulder_pos[1][0], shoulder_pos[1][1], shoulder_pos[1][2]};
         Eigen::Vector3d fr = {shoulder_pos[2][0], shoulder_pos[2][1], shoulder_pos[2][2]};
         Eigen::Vector3d rr = {shoulder_pos[3][0], shoulder_pos[3][1], shoulder_pos[3][2]};
 
-        Eigen::Vector3d x_axis = (fl - fr).normalized();
-        Eigen::Vector3d y_axis = (fl - rl).normalized();
+        Eigen::Vector3d x_axis = (fl - rl).normalized();
+        Eigen::Vector3d y_axis = (fl - fr).normalized();
         Eigen::Vector3d z_axis = x_axis.cross(y_axis).normalized();
         y_axis = z_axis.cross(x_axis).normalized();
 
@@ -86,47 +122,41 @@ public:
         motion_repub = nh.advertise<std_msgs::Float64MultiArray>("/reference_motion", 1);
         mocap_sub = nh.subscribe("/qualisys/no_labels_marker_array", 1, &MotionRepub::mocapCallback, this);
 
-        // body_frame_str = "2616";
+        foot_frames_ids = {
+            yamlNode["frame_ids"]["foot_frame_ids"]["FL"].as<int>(),
+            yamlNode["frame_ids"]["foot_frame_ids"]["RL"].as<int>(),
+            yamlNode["frame_ids"]["foot_frame_ids"]["FR"].as<int>(),
+            yamlNode["frame_ids"]["foot_frame_ids"]["RR"].as<int>()
+        };
+        shoulder_frames_ids = {
+            yamlNode["frame_ids"]["shoulder_frame_ids"]["FL"].as<int>(),
+            yamlNode["frame_ids"]["shoulder_frame_ids"]["RL"].as<int>(),
+            yamlNode["frame_ids"]["shoulder_frame_ids"]["FR"].as<int>(),
+            yamlNode["frame_ids"]["shoulder_frame_ids"]["RR"].as<int>()
+        };
 
-        // FL, RL, FR, RR
-        foot_frames_ids = {5820, 2857, 5822, 5817};
-        shoulder_frames_ids = {5784, 5799, 5795, 5798};
         for (int i = 0; i < foot_frames_ids.size(); i++) {
             foot_frame_num[foot_frames_ids[i]] = i;
-            foot_pos.push_back(std::vector<double>(3, 0));
+            foot_pos.push_back(Eigen::Vector3d::Zero());
         }
         for (int i = 0; i < shoulder_frames_ids.size(); i++) {
             shoulder_frame_num[shoulder_frames_ids[i]] = i;
-            shoulder_pos.push_back(std::vector<double>(3, 0));
+            shoulder_pos.push_back(Eigen::Vector3d::Zero());
         }
     }
-
-    // void mocapCallback(const tf2_msgs::TFMessage::ConstPtr& msg) {
-    //     for (const auto& transform : msg->transforms) {
-    //         // ROS_INFO_STREAM("child_frame_id: " << transform.child_frame_id);
-    //         if (transform.child_frame_id == body_frame_str) {
-    //             body_pos = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
-    //             body_quat = {transform.transform.rotation.x, transform.transform.rotation.y, transform.transform.rotation.z, transform.transform.rotation.w};
-    //         }
-    //         else if (std::find(foot_frames_str.begin(), foot_frames_str.end(), transform.child_frame_id) != foot_frames_str.end()) {
-    //             int foot_index = foot_frame_num[transform.child_frame_id];
-
-    //             std::vector<double> foot_pos_w = {transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z};
-    //             std::vector<double> foot_pos_b = transformW2B(body_pos, body_quat, foot_pos_w);
-    //             foot_pos[foot_index] = foot_pos_b;
-    //         }
-    //     }
-    // }
 
     void mocapCallback(const visualization_msgs::MarkerArray::ConstPtr& msg) {
         for (const auto& marker : msg->markers) {
             // ROS_INFO_STREAM("child_frame_id: " << marker.header.frame_id);
             if (std::find(shoulder_frames_ids.begin(), shoulder_frames_ids.end(), marker.id) != shoulder_frames_ids.end()) {
-                // body_pos = {marker.pose.position.x, marker.pose.position.y, marker.pose.position.z};
-                // body_quat = {marker.pose.orientation.w, marker.pose.orientation.x, marker.pose.orientation.y, marker.pose.orientation.z};
                 int shoulder_index = shoulder_frame_num[marker.id];
 
-                std::vector<double> shoulder_pos_w = {marker.pose.position.x, marker.pose.position.y, marker.pose.position.z};
+                Eigen::Vector3d shoulder_pos_w = Eigen::Vector3d(
+                    marker.pose.position.x,
+                    marker.pose.position.y,
+                    marker.pose.position.z
+                );
+
                 shoulder_pos[shoulder_index] = shoulder_pos_w;
 
                 calculateBodyPosQuat();
@@ -134,9 +164,15 @@ public:
             else if (std::find(foot_frames_ids.begin(), foot_frames_ids.end(), marker.id) != foot_frames_ids.end()) {
                 int foot_index = foot_frame_num[marker.id];
 
-                std::vector<double> foot_pos_w = {marker.pose.position.x, marker.pose.position.y, marker.pose.position.z};
-                std::vector<double> foot_pos_b = transformW2B(body_pos, body_quat, foot_pos_w);
-                foot_pos[foot_index] = foot_pos_b;
+                Eigen::Vector3d foot_pos_w = Eigen::Vector3d(
+                    marker.pose.position.x,
+                    marker.pose.position.y,
+                    marker.pose.position.z
+                );
+                
+                if (foot_index < 2) foot_pos_w[1] += 0.2;
+                else foot_pos_w[1] -= 0.2;
+                foot_pos[foot_index] = transformW2B(body_pos, body_quat, foot_pos_w);
             }
         }
     }
