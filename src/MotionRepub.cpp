@@ -23,7 +23,6 @@ private:
     ros::Publisher motion_repub;
     ros::Subscriber mocap_sub;
 
-    // std::string body_frame_str;
     std::vector<int> foot_frames_ids;
     std::vector<int> shoulder_frames_ids;
 
@@ -32,16 +31,13 @@ private:
 
     Eigen::Vector3d body_pos = Eigen::Vector3d::Zero();
     Eigen::Quaterniond body_quat = {1.0, 0.0, 0.0, 0.0};
-    // std::vector<double> body_pos = {0, 0, 0};       // x, y, z
-    // std::vector<double> body_quat = {1, 0, 0, 0};   // w, x, y, z
     Eigen::Vector3d proj_grav = {0.0, 0.0, -1.0};
-    // std::vector<double> proj_grav = {0, 0, 1};
     std::vector<Eigen::Vector3d> shoulder_pos;      // [shoulder_num][x, y, z]
-    std::vector<Eigen::Vector3d> foot_pos;      // [foot_num][x, y, z]
+    std::vector<Eigen::Vector3d> foot_pos;          // [foot_num][x, y, z]
     std::vector<Eigen::Quaterniond> foot_quat;      // [foot_num][w, x, y, z]
 
     yaml_tools::YamlNode yamlNode = yaml_tools::YamlNode::fromFile(
-        ros::package::getPath("your_package_name") + "/config" + "/frame_cfg.yaml"
+        ros::package::getPath("imitate_mocap_repub") + "/config" + "/frame_cfg.yaml"
     );
 
     Eigen::Vector3d quatToProjGrav(Eigen::Quaterniond q) {
@@ -92,19 +88,22 @@ private:
 
     void calculateBodyPosQuat() {
         // calculate body position as average of shoulder positions
-        // calculate body quaternion based on shoulder positions given order FL, BL, FR, BR
-        body_pos[0] = (shoulder_pos[0][0] + shoulder_pos[1][0] + shoulder_pos[2][0] + shoulder_pos[3][0]) / 4;
-        body_pos[1] = (shoulder_pos[0][1] + shoulder_pos[1][1] + shoulder_pos[2][1] + shoulder_pos[3][1]) / 4;
-        body_pos[2] = (shoulder_pos[0][2] + shoulder_pos[1][2] + shoulder_pos[2][2] + shoulder_pos[3][2]) / 4;
-        body_pos[2] += 0.15;
-        // calculate body quaternion
-        Eigen::Vector3d fl = {shoulder_pos[0][0], shoulder_pos[0][1], shoulder_pos[0][2]};
-        Eigen::Vector3d rl = {shoulder_pos[1][0], shoulder_pos[1][1], shoulder_pos[1][2]};
-        Eigen::Vector3d fr = {shoulder_pos[2][0], shoulder_pos[2][1], shoulder_pos[2][2]};
-        Eigen::Vector3d rr = {shoulder_pos[3][0], shoulder_pos[3][1], shoulder_pos[3][2]};
+        Eigen::Vector3d fl = shoulder_pos[0];
+        Eigen::Vector3d rl = shoulder_pos[1];
+        Eigen::Vector3d fr = shoulder_pos[2];
+        Eigen::Vector3d rr = shoulder_pos[3];
 
-        Eigen::Vector3d x_axis = (fl - rl).normalized();
-        Eigen::Vector3d y_axis = (fl - fr).normalized();
+        body_pos = (fl + fr + rl + rr) / 4;
+        body_pos[2] += 0.15;    // box dog height offset
+
+        // calculate body quaternion
+        Eigen::Vector3d front_mid = (fl + fr) / 2;
+        Eigen::Vector3d rear_mid = (rl + rr) / 2;
+        Eigen::Vector3d left_mid = (fl + rl) / 2;
+        Eigen::Vector3d right_mid = (fr + rr) / 2;
+
+        Eigen::Vector3d x_axis = (front_mid - rear_mid).normalized();
+        Eigen::Vector3d y_axis = (left_mid - right_mid).normalized();
         Eigen::Vector3d z_axis = x_axis.cross(y_axis).normalized();
         y_axis = z_axis.cross(x_axis).normalized();
 
@@ -170,6 +169,7 @@ public:
                     marker.pose.position.z
                 );
                 
+                // box dog foot offset
                 if (foot_index < 2) foot_pos_w[1] += 0.2;
                 else foot_pos_w[1] -= 0.2;
                 foot_pos[foot_index] = transformW2B(body_pos, body_quat, foot_pos_w);
