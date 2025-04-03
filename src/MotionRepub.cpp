@@ -37,6 +37,8 @@ private:
     std::vector<Eigen::Vector3d> foot_offset;
     std::vector<Eigen::Quaterniond> foot_quat;      // [foot_num][w, x, y, z]
 
+    double t_received = 0.0;
+
     yaml_tools::YamlNode yamlNode = yaml_tools::YamlNode::fromFile(
         ros::package::getPath("imitate_mocap_repub") + "/config" + "/frame_cfg.yaml"
     );
@@ -48,7 +50,7 @@ private:
     }
 
     Eigen::Vector3d offsetWorldCoordinates(Eigen::Vector3d p, Eigen::Vector3d offset) {
-        return p + offset;
+        return p + body_quat * offset;
     }
     
     Eigen::Vector3d transformW2B(Eigen::Vector3d base_p, Eigen::Quaterniond base_q, Eigen::Vector3d p) {
@@ -105,7 +107,7 @@ private:
         Eigen::Vector3d rr = shoulder_pos[3];
 
         body_pos = (fl + fr + rl + rr) / 4;
-        body_pos[2] += 0.15;    // box dog height offset
+        body_pos[2] += 0.05;    // box dog height offset
 
         // calculate body quaternion
         Eigen::Vector3d front_mid = (fl + fr) / 2;
@@ -179,6 +181,7 @@ public:
     }
 
     void mocapCallback(const visualization_msgs::MarkerArray::ConstPtr& msg) {
+        t_received = 0.0;
         for (const auto& marker : msg->markers) {
             // ROS_INFO_STREAM("child_frame_id: " << marker.header.frame_id);
             if (std::find(shoulder_frames_ids.begin(), shoulder_frames_ids.end(), marker.id) != shoulder_frames_ids.end()) {
@@ -201,10 +204,9 @@ public:
                     marker.pose.position.y,
                     marker.pose.position.z
                 );
-                
-                // box dog foot offset
-                if (foot_index < 2) foot_pos_w[1] += 0.2;
-                else foot_pos_w[1] -= 0.2;
+
+                foot_pos_w = offsetWorldCoordinates(foot_pos_w, foot_offset[foot_index]);
+
                 foot_pos[foot_index] = transformW2B(body_pos, body_quat, foot_pos_w);
             }
         }
@@ -214,22 +216,40 @@ public:
     void publishMotionData() {
         ros::Rate rate(50);
         while (ros::ok()) {
-            std_msgs::Float64MultiArray motion_msg;
+            // if not receiving publish empty message
+            if (t_received <= 0.06) {
+                std_msgs::Float64MultiArray motion_msg;
+    
+                proj_grav = quatToProjGrav(body_quat);
+    
+                for (int i = 0; i < foot_pos.size(); i++) {
+                    motion_msg.data.push_back(foot_pos[i][0]);
+                    motion_msg.data.push_back(foot_pos[i][1]);
+                    motion_msg.data.push_back(foot_pos[i][2]);
+                }
+                motion_msg.data.push_back(proj_grav[0]);
+                motion_msg.data.push_back(proj_grav[1]);
+                motion_msg.data.push_back(proj_grav[2]);
+                motion_msg.data.push_back(body_pos[2]);
+    
+                motion_repub.publish(motion_msg);
+    
+                t_received += 0.02;
+    
+                rate.sleep();
+            } else if (t_received == 0.08) {
+                std_msgs::Float64MultiArray motion_msg;
+                for (int i = 0; i < 16; i++) {
+                    motion_msg.data.push_back(0.0);
+                }
+                motion_repub.publish(motion_msg);
 
-            proj_grav = quatToProjGrav(body_quat);
+                t_received += 0.02;
 
-            for (int i = 0; i < foot_pos.size(); i++) {
-                motion_msg.data.push_back(foot_pos[i][0]);
-                motion_msg.data.push_back(foot_pos[i][1]);
-                motion_msg.data.push_back(foot_pos[i][2]);
+                rate.sleep();
+            } else {
+                rate.sleep();
             }
-            motion_msg.data.push_back(proj_grav[0]);
-            motion_msg.data.push_back(proj_grav[1]);
-            motion_msg.data.push_back(proj_grav[2]);
-            motion_msg.data.push_back(body_pos[2]);
-
-            motion_repub.publish(motion_msg);
-            rate.sleep();
         }
     }
 
