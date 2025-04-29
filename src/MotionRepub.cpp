@@ -33,6 +33,7 @@ private:
     Eigen::Quaterniond body_quat = {1.0, 0.0, 0.0, 0.0};
     Eigen::Vector3d proj_grav = {0.0, 0.0, -1.0};
     std::vector<Eigen::Vector3d> shoulder_pos;      // [shoulder_num][x, y, z]
+    std::vector<Eigen::Vector3d> shoulder_offset;
     std::vector<Eigen::Vector3d> foot_pos;          // [foot_num][x, y, z]
     std::vector<Eigen::Vector3d> foot_offset;
     std::vector<Eigen::Quaterniond> foot_quat;      // [foot_num][w, x, y, z]
@@ -107,7 +108,7 @@ private:
         Eigen::Vector3d rr = shoulder_pos[3];
 
         body_pos = (fl + fr + rl + rr) / 4;
-        body_pos[2] += 0.05;    // box dog height offset
+        body_pos[2] -= 0.1;    // box dog height offset
 
         // calculate body quaternion
         Eigen::Vector3d front_mid = (fl + fr) / 2;
@@ -170,6 +171,29 @@ public:
             )
         };
 
+        shoulder_offset = {
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["shoulder_offset"]["FL"][0].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["FL"][1].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["FL"][2].as<double>()
+            ),
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["shoulder_offset"]["RL"][0].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["RL"][1].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["RL"][2].as<double>()
+            ),
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["shoulder_offset"]["FR"][0].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["FR"][1].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["FR"][2].as<double>()
+            ),
+            Eigen::Vector3d(
+            yamlNode["frame_info"]["shoulder_offset"]["RR"][0].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["RR"][1].as<double>(),
+            yamlNode["frame_info"]["shoulder_offset"]["RR"][2].as<double>()
+            )
+        };
+
         for (int i = 0; i < foot_frames_ids.size(); i++) {
             foot_frame_num[foot_frames_ids[i]] = i;
             foot_pos.push_back(Eigen::Vector3d::Zero());
@@ -192,6 +216,8 @@ public:
                     marker.pose.position.y,
                     marker.pose.position.z
                 );
+
+                shoulder_pos_w = offsetWorldCoordinates(shoulder_pos_w, shoulder_offset[shoulder_index]);
 
                 shoulder_pos[shoulder_index] = shoulder_pos_w;
 
