@@ -23,11 +23,11 @@ private:
     ros::Publisher motion_repub;
     ros::Subscriber mocap_sub;
 
-    std::vector<int> foot_frames_ids;
-    std::vector<int> shoulder_frames_ids;
+    std::vector<std::string> foot_frames_ids;
+    std::vector<std::string> shoulder_frames_ids;
 
-    std::unordered_map<int, int> foot_frame_num;
-    std::unordered_map<int, int> shoulder_frame_num;
+    std::unordered_map<std::string, int> foot_frame_num;
+    std::unordered_map<std::string, int> shoulder_frame_num;
 
     Eigen::Vector3d body_pos = Eigen::Vector3d::Zero();
     Eigen::Quaterniond body_quat = {1.0, 0.0, 0.0, 0.0};
@@ -108,7 +108,7 @@ private:
         Eigen::Vector3d rr = shoulder_pos[3];
 
         body_pos = (fl + fr + rl + rr) / 4;
-        body_pos[2] -= 0.1;    // box dog height offset
+        // body_pos[2] -= 0.5;    // box dog height offset
 
         // calculate body quaternion
         Eigen::Vector3d front_mid = (fl + fr) / 2;
@@ -133,19 +133,20 @@ private:
 public:
     MotionRepub() : tfListener(tfBuffer) {
         motion_repub = nh.advertise<std_msgs::Float64MultiArray>("/reference_motion", 1);
-        mocap_sub = nh.subscribe("/qualisys/no_labels_marker_array", 1, &MotionRepub::mocapCallback, this);
+        // mocap_sub = nh.subscribe("/qualisys/no_labels_marker_array", 1, &MotionRepub::mocapCallback, this);
+        mocap_sub = nh.subscribe("/tf", 1, &MotionRepub::mocapCallback, this);
 
         foot_frames_ids = {
-            yamlNode["frame_info"]["foot_frame_ids"]["FL"].as<int>(),
-            yamlNode["frame_info"]["foot_frame_ids"]["RL"].as<int>(),
-            yamlNode["frame_info"]["foot_frame_ids"]["FR"].as<int>(),
-            yamlNode["frame_info"]["foot_frame_ids"]["RR"].as<int>()
+            yamlNode["frame_info"]["foot_frame_ids"]["FL"].as<std::string>(),
+            yamlNode["frame_info"]["foot_frame_ids"]["RL"].as<std::string>(),
+            yamlNode["frame_info"]["foot_frame_ids"]["FR"].as<std::string>(),
+            yamlNode["frame_info"]["foot_frame_ids"]["RR"].as<std::string>()
         };
         shoulder_frames_ids = {
-            yamlNode["frame_info"]["shoulder_frame_ids"]["FL"].as<int>(),
-            yamlNode["frame_info"]["shoulder_frame_ids"]["RL"].as<int>(),
-            yamlNode["frame_info"]["shoulder_frame_ids"]["FR"].as<int>(),
-            yamlNode["frame_info"]["shoulder_frame_ids"]["RR"].as<int>()
+            yamlNode["frame_info"]["shoulder_frame_ids"]["FL"].as<std::string>(),
+            yamlNode["frame_info"]["shoulder_frame_ids"]["RL"].as<std::string>(),
+            yamlNode["frame_info"]["shoulder_frame_ids"]["FR"].as<std::string>(),
+            yamlNode["frame_info"]["shoulder_frame_ids"]["RR"].as<std::string>()
         };
 
         foot_offset = {
@@ -204,35 +205,32 @@ public:
         }
     }
 
-    void mocapCallback(const visualization_msgs::MarkerArray::ConstPtr& msg) {
-        t_received = 0.0;
-        for (const auto& marker : msg->markers) {
-            // ROS_INFO_STREAM("child_frame_id: " << marker.header.frame_id);
-            if (std::find(shoulder_frames_ids.begin(), shoulder_frames_ids.end(), marker.id) != shoulder_frames_ids.end()) {
-                int shoulder_index = shoulder_frame_num[marker.id];
-
+    void mocapCallback(const tf2_msgs::TFMessage::ConstPtr& msg) {
+        for (const auto& transform : msg->transforms) {
+            const std::string& child_frame_id = transform.child_frame_id;
+            
+            if (child_frame_id[0] == 'S') {
+                t_received = 0.0;
+                int shoulder_index = shoulder_frame_num[child_frame_id.substr(0, 3)];
                 Eigen::Vector3d shoulder_pos_w = Eigen::Vector3d(
-                    marker.pose.position.x,
-                    marker.pose.position.y,
-                    marker.pose.position.z
+                    transform.transform.translation.x,
+                    transform.transform.translation.y,
+                    transform.transform.translation.z
                 );
 
                 shoulder_pos_w = offsetWorldCoordinates(shoulder_pos_w, shoulder_offset[shoulder_index]);
-
                 shoulder_pos[shoulder_index] = shoulder_pos_w;
-
                 calculateBodyPosQuat();
-            } else if (std::find(foot_frames_ids.begin(), foot_frames_ids.end(), marker.id) != foot_frames_ids.end()) {
-                int foot_index = foot_frame_num[marker.id];
-
+            } else if (child_frame_id[0] == 'F') {
+                t_received = 0.0;
+                int foot_index = foot_frame_num[child_frame_id.substr(0, 3)];
                 Eigen::Vector3d foot_pos_w = Eigen::Vector3d(
-                    marker.pose.position.x,
-                    marker.pose.position.y,
-                    marker.pose.position.z
+                    transform.transform.translation.x,
+                    transform.transform.translation.y,
+                    transform.transform.translation.z
                 );
 
                 foot_pos_w = offsetWorldCoordinates(foot_pos_w, foot_offset[foot_index]);
-
                 foot_pos[foot_index] = transformW2B(body_pos, body_quat, foot_pos_w);
             }
         }
@@ -243,6 +241,7 @@ public:
         ros::Rate rate(50);
         while (ros::ok()) {
             // if not receiving publish empty message
+            ROS_INFO_STREAM("t_received: " << t_received);
             if (t_received <= 0.06) {
                 std_msgs::Float64MultiArray motion_msg;
     
@@ -263,7 +262,7 @@ public:
                 t_received += 0.02;
     
                 rate.sleep();
-            } else if (t_received == 0.08) {
+            } else if (t_received <= 0.2) {
                 std_msgs::Float64MultiArray motion_msg;
                 for (int i = 0; i < 16; i++) {
                     motion_msg.data.push_back(0.0);
